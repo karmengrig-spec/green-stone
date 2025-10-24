@@ -1,9 +1,14 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-html, body, #root { height: 100%; background:#fafafa; }
-button { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
-:root{ --safe-top: env(safe-area-inset-top); --safe-bottom: env(safe-area-inset-bottom); }
-.safe-top { padding-top: calc(12px + var(--safe-top)); }
-.safe-bottom { padding-bottom: calc(24px + var(--safe-bottom)); }
-.header-sticky { position: sticky; top: env(safe-area-inset-top); z-index: 50; background: #fff; padding-top: 8px; }
+
+.safe-top { padding-top: max(env(safe-area-inset-top, 0px), 8px); }
+.safe-bottom { padding-bottom: max(env(safe-area-inset-bottom, 0px), 8px); }
+
+.header-sticky {
+  position: sticky;
+  top: calc(env(safe-area-inset-top, 0px));
+  z-index: 50;
+  padding-top: env(safe-area-inset-top, 0px);
+  background: white;
+}
