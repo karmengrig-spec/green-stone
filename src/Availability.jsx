@@ -1,6 +1,4 @@
-// at top of src/Availability.jsx
-import { useState, useEffect } from "react";
-import { isDriveConnected, ensureDriveAuth, backupJSON, loadBackupJSON } from "./drive";
+// src/Availability.jsx
 import React, { useMemo, useState, useEffect, useRef } from "react";
 import {
   addMonths, subMonths, startOfMonth, endOfMonth, startOfWeek, endOfWeek,
@@ -8,7 +6,7 @@ import {
 } from "date-fns";
 import { db } from "./firebase";
 import { collection, addDoc, onSnapshot, updateDoc, deleteDoc, doc, serverTimestamp } from "firebase/firestore";
-import { backupJSON, loadBackupJSON } from "./drive";
+import { isDriveConnected, ensureDriveAuth, backupJSON, loadBackupJSON } from "./drive";
 
 const roomsSeed = [
   { id: "r1", name: "Double Room" },
@@ -35,7 +33,7 @@ function RoomMonth({ room, month, bookings, onTapFree, onTapBooked, isAdmin }){
   const monthStart = startOfMonth(month);
   const gridStart = startOfWeek(monthStart, { weekStartsOn: 1 });
   const gridEnd = endOfWeek(endOfMonth(monthStart), { weekStartsOn: 1 });
-  const days = React.useMemo(()=>{ const arr=[]; let d=gridStart; while(d<=gridEnd){ arr.push(d); d=addDays(d,1); } return arr; }, [month]);
+  const days = useMemo(()=>{ const arr=[]; let d=gridStart; while(d<=gridEnd){ arr.push(d); d=addDays(d,1); } return arr; }, [month]);
 
   return (
     <div className="mb-6">
@@ -82,7 +80,7 @@ function RoomMonth({ room, month, bookings, onTapFree, onTapBooked, isAdmin }){
 }
 
 function useDebounce(fn, delay=1200){
-  const t = React.useRef(null);
+  const t = useRef(null);
   const debounced = (...args) => {
     clearTimeout(t.current);
     t.current = setTimeout(()=>fn(...args), delay);
@@ -95,13 +93,19 @@ export default function Availability({ isAdmin }){
   const [bookings, setBookings] = useState([]);
   const [month, setMonth] = useState(startOfMonth(new Date()));
   const [syncError, setSyncError] = useState(null);
+  const [driveConnected, setDriveConnected] = useState(false);
+
   const CACHE_KEY = "ghc_cloud_cache_v1";
-  const BACKUP_FILE = "greenstone_bookings_backup.json";
+
+  // Auto-backup to Drive (debounced) — uses correct signature backupJSON(bookings)
   const debouncedBackup = useDebounce(async (data)=>{
-    try{ await backupJSON(BACKUP_FILE, data); }catch(e){}
+    try{ await backupJSON(data); }catch(e){}
   }, 1500);
 
+  // Load local cache
   useEffect(() => { try { const raw = localStorage.getItem(CACHE_KEY); if (raw) setBookings(JSON.parse(raw)); } catch {} }, []);
+
+  // Live Firestore sync
   useEffect(()=>{
     const coll = collection(db, "bookings");
     const unsub = onSnapshot(coll, (snap)=>{
@@ -116,6 +120,11 @@ export default function Availability({ isAdmin }){
       setSyncError(null);
     }, (err) => setSyncError(err?.message || "Live sync unavailable"));
     return () => unsub();
+  }, []);
+
+  // Drive status
+  useEffect(() => {
+    setDriveConnected(isDriveConnected());
   }, []);
 
   const roomNameById = useMemo(() => Object.fromEntries(rooms.map(r => [r.id, r.name])), [rooms]);
@@ -162,6 +171,7 @@ export default function Availability({ isAdmin }){
     if(!(e > s)){ alert("End date must be after start date."); return; }
     if (overlapsRange(modal.roomId, s, e, modal.mode==="edit" ? modal.bookingId : null)){ alert("These dates overlap an existing booking."); return; }
     setModal(m => ({...m, open:false}));
+
     if(modal.mode==="create"){
       const tempId = "local_" + Date.now();
       const newBk = { id: tempId, roomId: modal.roomId, guest: modal.guest || "Guest", note: modal.note || "", start: s.toISOString(), end: e.toISOString() };
@@ -169,7 +179,7 @@ export default function Availability({ isAdmin }){
       try {
         const ref = await addDoc(collection(db, "bookings"), { roomId:newBk.roomId, guest:newBk.guest, note:newBk.note, start:newBk.start, end:newBk.end, createdAt: serverTimestamp() });
         setBookings(prev => { const arr=prev.map(b => b.id===tempId ? { ...newBk, id: ref.id } : b); try{ localStorage.setItem(CACHE_KEY, JSON.stringify(arr)); }catch{} try{ debouncedBackup(arr); }catch{} return arr; });
-      } catch (err) { /* keep local */ }
+      } catch (err) { /* keep local if offline */ }
     } else {
       const edited = { id: modal.bookingId, roomId: modal.roomId, guest: modal.guest || "Guest", note: modal.note || "", start: s.toISOString(), end: e.toISOString() };
       setBookings(prev => { const arr=prev.map(b => b.id===edited.id ? edited : b); try{ localStorage.setItem(CACHE_KEY, JSON.stringify(arr)); }catch{} try{ debouncedBackup(arr); }catch{} return arr; });
@@ -188,55 +198,38 @@ export default function Availability({ isAdmin }){
     catch (err) {}
   }
 
-  const [driveConnected, setDriveConnected] = useState(false);
-
-useEffect(() => {
-  setDriveConnected(isDriveConnected());
-}, []);
-async function handleConnectDrive() {
-  try {
-    await ensureDriveAuth();
-    setDriveConnected(true);
-    alert("✅ Google Drive connected");
-  } catch (e) {
-    alert("❌ Drive connection failed: " + (e?.message || e));
-  }
-}
-
-async function handleBackupNow() {
-  try {
-    await backupJSON(bookings);
-    alert("✅ Backup saved to Drive as greenstone_bookings_backup.json");
-  } catch (e) {
-    alert("❌ Backup failed: " + (e?.message || e));
-  }
-}
-
-async function handleRestore() {
-  try {
-    const data = await loadBackupJSON();
-    if (data && Array.isArray(data)) {
-      setBookings(data);
-      alert("✅ Restore complete");
-    } else {
-      alert("ℹ️ No backup file found yet");
+  // Drive handlers
+  async function handleConnectDrive() {
+    try {
+      await ensureDriveAuth();
+      setDriveConnected(true);
+      alert("✅ Google Drive connected");
+    } catch (e) {
+      alert("❌ Drive connection failed: " + (e?.message || e));
     }
-  } catch (e) {
-    alert("❌ Restore failed: " + (e?.message || e));
   }
-}
-
-<div className="flex justify-center gap-2 my-2">
-  <button className="px-3 py-1 text-xs rounded-lg border bg-white" onClick={handleConnectDrive}>
-    {driveConnected ? "Drive: Connected" : "Connect Drive"}
-  </button>
-  <button className="px-3 py-1 text-xs rounded-lg border bg-white" onClick={handleBackupNow}>
-    Backup Now
-  </button>
-  <button className="px-3 py-1 text-xs rounded-lg border bg-white" onClick={handleRestore}>
-    Restore
-  </button>
-</div>
+  async function handleBackupNow() {
+    try {
+      await backupJSON(bookings);
+      alert("✅ Backup saved to Drive as greenstone_bookings_backup.json");
+    } catch (e) {
+      alert("❌ Backup failed: " + (e?.message || e));
+    }
+  }
+  async function handleRestore() {
+    try {
+      const data = await loadBackupJSON();
+      if (data && Array.isArray(data)) {
+        setBookings(data);
+        try{ localStorage.setItem(CACHE_KEY, JSON.stringify(data)); }catch{}
+        alert("✅ Restore complete");
+      } else {
+        alert("ℹ️ No backup file found yet");
+      }
+    } catch (e) {
+      alert("❌ Restore failed: " + (e?.message || e));
+    }
+  }
 
   return (
     <div className="w-full max-w-md mx-auto p-3 pb-28">
@@ -245,43 +238,51 @@ async function handleRestore() {
         <div className="text-lg font-semibold">{format(month, "LLLL yyyy")}</div>
         <button type="button" aria-label="Next month" className="px-3 py-2 rounded-xl border border-transparent" onClick={()=> setMonth(m=> addMonths(m,1))}>›</button>
       </div>
-      <div className="flex justify-center mb-2">
+
+      {/* Drive + CSV controls */}
+      <div className="flex flex-wrap gap-2 justify-center mb-2">
         <button type="button" className="mt-1 px-3 py-1 text-xs rounded-lg border bg-white shadow-sm" onClick={exportVisibleMonthCSV}>
           Export Month
         </button>
-        <button type="button" className="mt-1 ml-2 px-3 py-1 text-xs rounded-lg border bg-white shadow-sm"
-          onClick={() => backupJSON("greenstone_bookings_backup.json", bookings)}>
+        <button type="button" className="mt-1 px-3 py-1 text-xs rounded-lg border bg-white shadow-sm" onClick={handleConnectDrive}>
+          {driveConnected ? "Drive: Connected" : "Connect Drive"}
+        </button>
+        <button type="button" className="mt-1 px-3 py-1 text-xs rounded-lg border bg-white shadow-sm" onClick={handleBackupNow}>
           Backup Now
         </button>
-        <button type="button" className="mt-1 ml-2 px-3 py-1 text-xs rounded-lg border bg-white shadow-sm"
-          onClick={async ()=>{
-            try{
-              const data = await loadBackupJSON("greenstone_bookings_backup.json");
-              if (data && Array.isArray(data)) {
-                setBookings(data);
-                try{ localStorage.setItem(CACHE_KEY, JSON.stringify(data)); }catch{}
-              } else { alert("No backup found."); }
-            } catch { alert("Restore failed."); }
-          }}>
+        <button type="button" className="mt-1 px-3 py-1 text-xs rounded-lg border bg-white shadow-sm" onClick={handleRestore}>
           Restore
         </button>
       </div>
+
       <div className="flex items-center gap-3 text-xs text-slate-500 mb-2">
         <div className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-emerald-500"></span> Available</div>
         <div className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-red-500"></span> Booked</div>
       </div>
+
       <div className="bg-white rounded-2xl shadow border p-3">
         <div className="grid grid-cols-2 gap-x-6">
           {rooms.map(room => (
-            <RoomMonth key={room.id} room={room} month={month} bookings={bookings} onTapFree={openCreate} onTapBooked={openEdit} isAdmin={isAdmin} />
+            <RoomMonth
+              key={room.id}
+              room={room}
+              month={month}
+              bookings={bookings}
+              onTapFree={openCreate}
+              onTapBooked={openEdit}
+              isAdmin={isAdmin}
+            />
           ))}
         </div>
       </div>
+
       {modal.open && (
         <div className="fixed inset-0 z-50">
           <div className="absolute inset-0 bg-black/30" onClick={()=> setModal(m=> ({...m, open:false}))} />
           <div className="absolute inset-x-4 bottom-6 max-w-md mx-auto bg-white rounded-2xl shadow-lg border p-4">
-            <div className="text-sm font-semibold mb-2">{modal.mode==="create" ? "Add Booking" : (modal.readOnly ? "Booking Details (read-only)" : "Booking Details")}</div>
+            <div className="text-sm font-semibold mb-2">
+              {modal.mode==="create" ? "Add Booking" : (modal.readOnly ? "Booking Details (read-only)" : "Booking Details")}
+            </div>
             <div className="grid grid-cols-2 gap-2 text-sm">
               <label className="flex flex-col gap-1">
                 <span className="text-xs text-slate-500">Start</span>
