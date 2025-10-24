@@ -21,6 +21,30 @@
 <link rel="apple-touch-startup-image" href="/splash/1170x2532.png" media="(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3)" />
 <link rel="apple-touch-startup-image" href="/splash/1290x2796.png" media="(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3)" />
 
+<!-- Google API Loader for Drive backup -->
+<script src="https://apis.google.com/js/api.js"></script>
+<script>
+  // Expose CRA env var to this inline snippet (CRA replaces %REACT_APP_GOOGLE_CLIENT_ID% at build time)
+  window.REACT_APP_GOOGLE_CLIENT_ID = "%REACT_APP_GOOGLE_CLIENT_ID%";
+
+  // Initialize GAPI once the page loads
+  window.addEventListener("load", function () {
+    if (!window.gapi) return;
+    window.gapi.load("client:auth2", function () {
+      window.gapi.client
+        .init({
+          clientId: window.REACT_APP_GOOGLE_CLIENT_ID,
+          scope: "https://www.googleapis.com/auth/drive.file",
+          discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"],
+        })
+        .then(function () {
+          console.log("GAPI ready");
+        })
+        .catch(console.error);
+    });
+  });
+</script>
+
 </head>
 <body>
 <noscript>You need to enable JavaScript to run this app.</noscript>
