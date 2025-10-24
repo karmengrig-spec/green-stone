@@ -13,3 +13,10 @@ yarn-error.log*
 # misc
 .DS_StoreNUL
 NUL
+# Ignore build artifacts and Windows system files
+/build
+NUL
+cross-env
+CI=false
+guesthouse-calendar-cloud@3.3.0
+*.log
