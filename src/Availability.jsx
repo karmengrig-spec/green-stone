@@ -1,3 +1,6 @@
+// at top of src/Availability.jsx
+import { useState, useEffect } from "react";
+import { isDriveConnected, ensureDriveAuth, backupJSON, loadBackupJSON } from "./drive";
 import React, { useMemo, useState, useEffect, useRef } from "react";
 import {
   addMonths, subMonths, startOfMonth, endOfMonth, startOfWeek, endOfWeek,
@@ -184,6 +187,56 @@ export default function Availability({ isAdmin }){
     try { if (!String(id).startsWith("local_")) { await deleteDoc(doc(db, "bookings", id)); } }
     catch (err) {}
   }
+
+  const [driveConnected, setDriveConnected] = useState(false);
+
+useEffect(() => {
+  setDriveConnected(isDriveConnected());
+}, []);
+async function handleConnectDrive() {
+  try {
+    await ensureDriveAuth();
+    setDriveConnected(true);
+    alert("✅ Google Drive connected");
+  } catch (e) {
+    alert("❌ Drive connection failed: " + (e?.message || e));
+  }
+}
+
+async function handleBackupNow() {
+  try {
+    await backupJSON(bookings);
+    alert("✅ Backup saved to Drive as greenstone_bookings_backup.json");
+  } catch (e) {
+    alert("❌ Backup failed: " + (e?.message || e));
+  }
+}
+
+async function handleRestore() {
+  try {
+    const data = await loadBackupJSON();
+    if (data && Array.isArray(data)) {
+      setBookings(data);
+      alert("✅ Restore complete");
+    } else {
+      alert("ℹ️ No backup file found yet");
+    }
+  } catch (e) {
+    alert("❌ Restore failed: " + (e?.message || e));
+  }
+}
+
+<div className="flex justify-center gap-2 my-2">
+  <button className="px-3 py-1 text-xs rounded-lg border bg-white" onClick={handleConnectDrive}>
+    {driveConnected ? "Drive: Connected" : "Connect Drive"}
+  </button>
+  <button className="px-3 py-1 text-xs rounded-lg border bg-white" onClick={handleBackupNow}>
+    Backup Now
+  </button>
+  <button className="px-3 py-1 text-xs rounded-lg border bg-white" onClick={handleRestore}>
+    Restore
+  </button>
+</div>
 
   return (
     <div className="w-full max-w-md mx-auto p-3 pb-28">

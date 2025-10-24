@@ -1,0 +1,84 @@
+// src/drive.js
+const SCOPE = "https://www.googleapis.com/auth/drive.file";
+const FILENAME = "greenstone_bookings_backup.json";
+
+function getAuth() {
+  const auth = window.gapi?.auth2?.getAuthInstance?.();
+  if (!auth) throw new Error("Google API not ready yet. Reload the page and try again.");
+  return auth;
+}
+
+export function isDriveConnected() {
+  try {
+    return getAuth().isSignedIn.get();
+  } catch {
+    return false;
+  }
+}
+
+export async function ensureDriveAuth() {
+  const auth = getAuth();
+  if (!auth.isSignedIn.get()) {
+    await auth.signIn(); // opens Google consent popup on first time
+  }
+  return auth.currentUser.get();
+}
+
+async function findBackupFileId() {
+  const resp = await window.gapi.client.drive.files.list({
+    q: `name='${FILENAME.replace(/'/g, "\\'")}' and trashed=false`,
+    fields: "files(id,name)",
+  });
+  return resp.result.files?.[0]?.id || null;
+}
+
+/** Upload JSON to Drive (create once, update on subsequent saves). */
+export async function backupJSON(jsonObj) {
+  await ensureDriveAuth();
+
+  const metadata = { name: FILENAME, mimeType: "application/json" };
+  const body = JSON.stringify(jsonObj, null, 2);
+  const boundary = "gc_boundary_" + Date.now();
+  const delimiter = `\r\n--${boundary}\r\n`;
+  const closeDelim = `\r\n--${boundary}--`;
+
+  const multipartBody =
+    delimiter +
+    "Content-Type: application/json; charset=UTF-8\r\n\r\n" +
+    JSON.stringify(metadata) +
+    delimiter +
+    "Content-Type: application/json\r\n\r\n" +
+    body +
+    closeDelim;
+
+  const fileId = await findBackupFileId();
+
+  if (fileId) {
+    // Update existing file
+    return window.gapi.client.request({
+      path: `/upload/drive/v3/files/${fileId}`,
+      method: "PATCH",
+      params: { uploadType: "multipart" },
+      headers: { "Content-Type": `multipart/related; boundary=${boundary}` },
+      body: multipartBody,
+    });
+  }
+
+  // Create new file
+  return window.gapi.client.request({
+    path: "/upload/drive/v3/files",
+    method: "POST",
+    params: { uploadType: "multipart" },
+    headers: { "Content-Type": `multipart/related; boundary=${boundary}` },
+    body: multipartBody,
+  });
+}
+
+/** Read the JSON backup from Drive. Returns parsed array or null if not found. */
+export async function loadBackupJSON() {
+  await ensureDriveAuth();
+  const fileId = await findBackupFileId();
+  if (!fileId) return null;
+  const resp = await window.gapi.client.drive.files.get({ fileId, alt: "media" });
+  return resp.result;
+}
