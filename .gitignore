@@ -12,3 +12,4 @@ yarn-error.log*
 .env
 # misc
 .DS_StoreNUL
+NUL
