@@ -1,43 +1,56 @@
 // src/drive.js
+
 const SCOPE = "https://www.googleapis.com/auth/drive.file";
 const FILENAME = "greenstone_bookings_backup.json";
 
+/** Internal: get the Google Auth instance or throw if GAPI isn't ready yet */
 function getAuth() {
-  const auth = window.gapi?.auth2?.getAuthInstance?.();
-  if (!auth) throw new Error("Google API not ready yet. Reload the page and try again.");
+  const auth = window?.gapi?.auth2?.getAuthInstance?.();
+  if (!auth) {
+    throw new Error("Google API not ready yet. Reload the page and try again.");
+  }
   return auth;
 }
 
+/** Returns true if the user has an active Google auth session */
 export function isDriveConnected() {
   try {
-    return getAuth().isSignedIn.get();
+    return !!getAuth().isSignedIn.get();
   } catch {
     return false;
   }
 }
 
+/** Ensures the user is signed in and has granted drive.file scope */
 export async function ensureDriveAuth() {
   const auth = getAuth();
   if (!auth.isSignedIn.get()) {
-    await auth.signIn(); // opens Google consent popup on first time
+    await auth.signIn(); // opens consent dialog on first time
   }
   return auth.currentUser.get();
 }
 
+/** Find our single backup file by name; returns fileId or null */
 async function findBackupFileId() {
   const resp = await window.gapi.client.drive.files.list({
     q: `name='${FILENAME.replace(/'/g, "\\'")}' and trashed=false`,
     fields: "files(id,name)",
+    pageSize: 1
   });
   return resp.result.files?.[0]?.id || null;
 }
 
-/** Upload JSON to Drive (create once, update on subsequent saves). */
+/** Create or update the JSON backup in Drive */
 export async function backupJSON(jsonObj) {
   await ensureDriveAuth();
 
-  const metadata = { name: FILENAME, mimeType: "application/json" };
-  const body = JSON.stringify(jsonObj, null, 2);
+  const metadata = {
+    name: FILENAME,
+    mimeType: "application/json"
+  };
+
+  const body = JSON.stringify(jsonObj ?? [], null, 2);
+
   const boundary = "gc_boundary_" + Date.now();
   const delimiter = `\r\n--${boundary}\r\n`;
   const closeDelim = `\r\n--${boundary}--`;
@@ -60,7 +73,7 @@ export async function backupJSON(jsonObj) {
       method: "PATCH",
       params: { uploadType: "multipart" },
       headers: { "Content-Type": `multipart/related; boundary=${boundary}` },
-      body: multipartBody,
+      body: multipartBody
     });
   }
 
@@ -70,15 +83,20 @@ export async function backupJSON(jsonObj) {
     method: "POST",
     params: { uploadType: "multipart" },
     headers: { "Content-Type": `multipart/related; boundary=${boundary}` },
-    body: multipartBody,
+    body: multipartBody
   });
 }
 
-/** Read the JSON backup from Drive. Returns parsed array or null if not found. */
+/** Load and parse the JSON backup from Drive; returns array or null */
 export async function loadBackupJSON() {
   await ensureDriveAuth();
   const fileId = await findBackupFileId();
   if (!fileId) return null;
-  const resp = await window.gapi.client.drive.files.get({ fileId, alt: "media" });
+
+  const resp = await window.gapi.client.drive.files.get({
+    fileId,
+    alt: "media"
+  });
+
   return resp.result;
 }
