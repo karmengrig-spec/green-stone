@@ -88,13 +88,14 @@ export default function Availability({ isAdmin }){
 
   useEffect(() => { setDriveConnected(isDriveConnected()); }, []);
   useEffect(()=>{
+    const unsubAuth = observeAuth((u)=>{ setUser(u); setIsAdmin(isAdminUser(u)); });
     const coll = collection(db, "bookings");
     const unsub = onSnapshot(coll, (snap)=>{
       const cloud = []; snap.forEach(docSnap => cloud.push({ id: docSnap.id, ...docSnap.data() }));
       setBookings(cloud);
       try { localStorage.setItem(CACHE_KEY, JSON.stringify(cloud)); } catch {}
     });
-    return () => unsub();
+    return () => { unsub(); if (unsubAuth) unsubAuth(); };
   }, []);
 
   async function handleConnectDrive() { try { await ensureDriveAuth(); setDriveConnected(true); alert("✅ Google Drive connected"); } catch (e) { alert("❌ Drive connection failed: " + (e?.message || e)); } }
@@ -118,7 +119,7 @@ export default function Availability({ isAdmin }){
   }
 
   return (
-    <div className="w-full max-w-md mx-auto p-3 pb-28">
+    <div className="w-full max-w-md mx-auto p-3 pb-28 safe-top safe-bottom">
       <div className="flex items-center justify-between mb-1 header-sticky bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/70">
         <button type="button" className="px-3 py-2 rounded-xl" onClick={()=> setMonth(m=> subMonths(m,1))}>‹</button>
         <div className="text-xl font-bold">{format(month, "LLLL yyyy")}</div>
@@ -132,7 +133,29 @@ export default function Availability({ isAdmin }){
         <button className="mt-1 px-3 py-1 text-xs rounded-lg border bg-white shadow-sm" onClick={handleRestore}>Load from Drive</button>
       </div>
 
-      <div className="flex items-center gap-3 text-xs text-slate-500 mb-2">
+
+      {/* Admin & Drive Controls */}
+      <div className="flex flex-wrap items-center justify-center gap-2 my-2">
+        {!user ? (
+          <button type="button" className="px-3 py-1 text-xs rounded-lg border bg-white" onClick={()=>{
+            const email = prompt('Admin email:');
+            const pwd = prompt('Password:');
+            if(email && pwd){ signIn(email, pwd).catch(e=>alert('Sign in failed: ' + (e?.message || e))); }
+          }}>Sign In</button>
+        ) : (
+          <>
+            <span className="text-xs text-slate-600">Signed in: {user.email}</span>
+            <button type="button" className="px-3 py-1 text-xs rounded-lg border bg-white" onClick={()=>signOutUser()}>Sign Out</button>
+          </>
+        )}
+        <button type="button" className="px-3 py-1 text-xs rounded-lg border bg-white" onClick={handleConnectDrive}>
+          {driveConnected ? "Drive: Connected" : "Connect Drive"}
+        </button>
+        <button type="button" className="px-3 py-1 text-xs rounded-lg border bg-white" onClick={handleBackupNow}>Backup Now</button>
+        <button type="button" className="px-3 py-1 text-xs rounded-lg border bg-white" onClick={handleRestore}>Restore</button>
+      </div>
+
+<div className="flex items-center gap-3 text-xs text-slate-500 mb-2">
         <div className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-emerald-500"></span> Available</div>
         <div className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-red-500"></span> Booked</div>
       </div>

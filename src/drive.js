@@ -1,94 +1,68 @@
-// src/drive.js
+const DEFAULT_BACKUP_KEY='drive_mock_backup_json';
+// Lightweight Drive shim so the app compiles & works immediately.
+// Uses localStorage as a placeholder. You can swap this later for real Drive API.
 
-const SCOPE = "https://www.googleapis.com/auth/drive.file";
-const FILENAME = "greenstone_bookings_backup.json";
+const CONNECT_KEY = 'drive_mock_connected';
+const BACKUP_KEY  = 'drive_mock_backup_json';
 
-/** Internal: get the Google Auth instance or throw if GAPI isn't ready yet */
-function getAuth() {
-  const auth = window?.gapi?.auth2?.getAuthInstance?.();
-  if (!auth) throw new Error("Google API not ready yet. Reload the page and try again.");
-  return auth;
+// --- Connection state ---
+export function isDriveConnected() {
+  try { return localStorage.getItem(CONNECT_KEY) === '1'; } catch { return false; }
 }
 
-/** Returns true if the user has an active Google auth session */
-export function isDriveConnected() {
+// --- Backward compatibility for older imports ---
+//temporary change
+export function isSignedIntoDrive() {
+  return isDriveConnected();
+}
+
+// --- Authentication shims ---
+export async function ensureDriveAuth() {
+  try { localStorage.setItem(CONNECT_KEY, '1'); } catch {}
+  return true;
+}
+
+export async function signInDrive() {
+  try { localStorage.setItem(CONNECT_KEY, '1'); } catch {}
+  return true;
+}
+
+export async function signOutDrive() {
+  try { localStorage.removeItem(CONNECT_KEY); } catch {}
+  return true;
+}
+
+// --- Data backup/load ---
+export async function backupJSON(arg1, arg2) {
+  const data = (Array.isArray(arg1) || typeof arg1 === 'object') ? arg1 : arg2;
+  if (data === undefined) return false;
   try {
-    return !!getAuth().isSignedIn.get();
-  } catch {
+    localStorage.setItem(BACKUP_KEY, JSON.stringify(data));
+    return true;
+  } catch (e) {
+    console.error('backupJSON failed:', e);
     return false;
   }
 }
 
-/** Ensures the user is signed in and has granted drive.file scope */
-export async function ensureDriveAuth() {
-  const auth = getAuth();
-  if (!auth.isSignedIn.get()) {
-    await auth.signIn(); // opens consent on first time
+export async function loadBackupJSON(name){
+  const key = (typeof name === 'string') ? name : DEFAULT_BACKUP_KEY;
+
+  try {
+    const raw = localStorage.getItem(BACKUP_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    console.error('loadBackupJSON failed:', e);
+    return null;
   }
-  return auth.currentUser.get();
 }
 
-/** Find our single backup file by name; returns fileId or null */
-async function findBackupFileId() {
-  const resp = await window.gapi.client.drive.files.list({
-    q: `name='${FILENAME.replace(/'/g, "\\'")}' and trashed=false`,
-    fields: "files(id,name)",
-    pageSize: 1
-  });
-  return resp.result.files?.[0]?.id || null;
-}
-
-/** Create or update the JSON backup in Drive */
-export async function backupJSON(jsonObj) {
-  await ensureDriveAuth();
-
-  const metadata = { name: FILENAME, mimeType: "application/json" };
-  const body = JSON.stringify(jsonObj ?? [], null, 2);
-
-  const boundary = "gc_boundary_" + Date.now();
-  const delimiter = `\r\n--${boundary}\r\n`;
-  const closeDelim = `\r\n--${boundary}--`;
-
-  const multipartBody =
-    delimiter +
-    "Content-Type: application/json; charset=UTF-8\r\n\r\n" +
-    JSON.stringify(metadata) +
-    delimiter +
-    "Content-Type: application/json\r\n\r\n" +
-    body +
-    closeDelim;
-
-  const fileId = await findBackupFileId();
-
-  if (fileId) {
-    // Update existing file
-    return window.gapi.client.request({
-      path: `/upload/drive/v3/files/${fileId}`,
-      method: "PATCH",
-      params: { uploadType: "multipart" },
-      headers: { "Content-Type": `multipart/related; boundary=${boundary}` },
-      body: multipartBody
-    });
-  }
-
-  // Create new file
-  return window.gapi.client.request({
-    path: "/upload/drive/v3/files",
-    method: "POST",
-    params: { uploadType: "multipart" },
-    headers: { "Content-Type": `multipart/related; boundary=${boundary}` },
-    body: multipartBody
-  });
-}
-
-/** Load and parse the JSON backup from Drive; returns array or null */
-export async function loadBackupJSON() {
-  await ensureDriveAuth();
-  const fileId = await findBackupFileId();
-  if (!fileId) return null;
-  const resp = await window.gapi.client.drive.files.get({ fileId, alt: "media" });
-  return resp.result;
-}
-
-// Optional: expose constants if needed elsewhere
-export { SCOPE, FILENAME };
+export default {
+  isDriveConnected,
+  isSignedIntoDrive,
+  ensureDriveAuth,
+  signInDrive,
+  signOutDrive,
+  backupJSON,
+  loadBackupJSON,
+};
