@@ -2,26 +2,29 @@ import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 
+// --- INLINE CONFIG for troubleshooting (bypasses env var issues) ---
 const firebaseConfig = {
-  apiKey:            process.env.REACT_APP_FIREBASE_API_KEY,
-  authDomain:        process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
-  projectId:         process.env.REACT_APP_FIREBASE_PROJECT_ID,
-  storageBucket:     process.env.REACT_APP_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID,
-  appId:             process.env.REACT_APP_FIREBASE_APP_ID,
+  apiKey: "AIzaSyDyu0mh4Wk0gHHA0VbkEgsI8dgzj4JUmaM",
+  authDomain: "guesthouse-calendar-f8fb6.firebaseapp.com",
+  projectId: "guesthouse-calendar-f8fb6",
+  storageBucket: "guesthouse-calendar-f8fb6.firebasestorage.app",
+  messagingSenderId: "316596087831",
+  appId: "1:316596087831:web:1d1f9f523909cdee98ecad2",
+  measurementId: "G-TD2SVX3HNB",
 };
 
-if (!firebaseConfig.apiKey) {
-  Object.assign(firebaseConfig, {
-    apiKey:            "PASTE_API_KEY",
-    authDomain:        "PASTE_AUTH_DOMAIN",
-    projectId:         "PASTE_PROJECT_ID",
-    storageBucket:     "PASTE_STORAGE_BUCKET",
-    messagingSenderId: "PASTE_MESSAGING_SENDER_ID",
-    appId:             "PASTE_APP_ID",
-  });
+let app;
+try {
+  app = initializeApp(firebaseConfig);
+} catch (e) {
+  // render a visible banner if init fails
+  const msg = document.createElement('div');
+  msg.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#fee;color:#b00;padding:12px;z-index:9999;font:14px/1.4 system-ui';
+  msg.textContent = 'Firebase init failed: ' + (e?.message || e);
+  document.body.appendChild(msg);
+  throw e;
 }
 
-const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
 export const auth = getAuth(app);
+export default app;
