@@ -1,6 +1,6 @@
 {
   "short_name": "Bookings",
-  "name": "Guesthouse Bookings (Local)",
+  "name": "Guesthouse Bookings",
   "display": "standalone",
   "start_url": ".",
   "theme_color": "#0a7a3b",
