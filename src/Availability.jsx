@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { addMonths, format, startOfMonth, endOfMonth, eachDayOfInterval } from "date-fns";
-import { cloudEnabled, cloudFetchAll, onCloudChanges, cloudUpsertMany, cloudDelete } from "./cloud.js";
+import { cloudFetchAll, onCloudChanges, cloudUpsertMany, cloudDelete } from "./cloud.js";
 
 const ROOMS = [
   "Double Room",
@@ -22,9 +22,10 @@ const keyOf = (d) => format(d, "yyyy-MM-dd");
 export default function Availability({ cloudOn }){
   const [month, setMonth] = useState(startOfMonth(new Date()));
   const [bookings, setBookings] = useState(loadLocal());
-  const [selecting, setSelecting] = useState(null);
-  const [rangeHover, setRangeHover] = useState(null);
-  const [modal, setModal] = useState(null);
+  const [selecting, setSelecting] = useState(null); // {room, start: Date}
+  const [hover, setHover] = useState(null); // Date for preview
+  const [editModal, setEditModal] = useState(null);   // single-day edit
+  const [rangeModal, setRangeModal] = useState(null); // {room, startDateStr, endDateStr, guest, notes}
   const [compact, setCompact] = useState(true);
   const [email, setEmail] = useState(localStorage.getItem("gh_email") || "");
   const isAdmin = email && ADMIN_EMAIL && email.toLowerCase() === ADMIN_EMAIL.toLowerCase();
@@ -56,48 +57,59 @@ export default function Availability({ cloudOn }){
     const dateStr = keyOf(date);
     const existing = find(room, dateStr);
     if (existing){
-      setModal({ room, date: existing.date, guest: existing.guest || "", notes: existing.notes || "" });
+      setEditModal({ room, date: existing.date, guest: existing.guest || "", notes: existing.notes || "" });
       return;
     }
     setSelecting({ room, start: date });
+    setHover(date);
   };
-  const finalizeSelect = async (room, date) => {
+  const updateHover = (date) => { if (selecting) setHover(date); };
+  const endSelect = (room, date) => {
     if (!isAdmin || !selecting) return;
-    if (selecting.room !== room){ setSelecting({ room, start: date }); return; }
+    if (selecting.room !== room){ setSelecting(null); setHover(null); return; }
     const [a,b] = [selecting.start, date].sort((x,y)=> x-y);
-    const newRows = eachDayOfInterval({ start:a, end:b })
-      .map(d => ({ room, date: keyOf(d), guest:"", notes:"" }));
-    const addRows = newRows.filter(t => !find(room, t.date));
+    const startStr = keyOf(a), endStr = keyOf(b);
+    setRangeModal({ room, startDateStr:startStr, endDateStr:endStr, guest:"", notes:"" });
+    setSelecting(null); setHover(null);
+  };
+  const inPreview = (room, date) => {
+    if (!selecting || selecting.room !== room) return false;
+    const [a,b] = [selecting.start, hover || selecting.start].sort((x,y)=> x-y);
+    return date >= a && date <= b;
+  };
+
+  const saveSingle = async () => {
+    if (!editModal || !isAdmin) return;
+    setBookings(prev =>
+      prev.map(b =>
+        (b.room === editModal.room && b.date === editModal.date)
+          ? { ...b, guest: editModal.guest || "", notes: editModal.notes || "" }
+          : b
+      )
+    );
+    if (cloudOn){ try{ await cloudUpsertMany([{...editModal}]); } catch(e){ console.error(e); } }
+    setEditModal(null);
+  };
+  const cancelSingle = async () => {
+    if (!editModal || !isAdmin) return;
+    setBookings(prev => prev.filter(b => !(b.room === editModal.room && b.date === editModal.date)));
+    if (cloudOn){ try{ await cloudDelete(editModal.room, editModal.date); } catch(e){ console.error(e); } }
+    setEditModal(null);
+  };
+
+  const saveRange = async () => {
+    if (!rangeModal || !isAdmin) return;
+    const { room, startDateStr, endDateStr, guest, notes } = rangeModal;
+    const [a,b] = [new Date(startDateStr), new Date(endDateStr)].sort((x,y)=> x-y);
+    const range = eachDayOfInterval({ start:a, end:b }).map(d => ({
+      room, date: keyOf(d), guest: guest || "", notes: notes || ""
+    }));
+    const addRows = range.filter(t => !find(room, t.date));
     if (addRows.length){
       setBookings(prev => [...prev, ...addRows]);
       if (cloudOn){ try{ await cloudUpsertMany(addRows); } catch(e){ console.error(e); } }
     }
-    setSelecting(null); setRangeHover(null);
-  };
-  const inSelectingRange = (room, date) => {
-    if (!selecting || selecting.room !== room) return false;
-    const [a,b] = [selecting.start, (rangeHover||selecting.start)].sort((x,y)=> x-y);
-    return date >= a && date <= b;
-  };
-
-  const saveModal = async () => {
-    if (!modal) return;
-    if (!isAdmin){ setModal(null); return; }
-    setBookings(prev =>
-      prev.map(b =>
-        (b.room === modal.room && b.date === modal.date)
-          ? { ...b, guest: modal.guest || "", notes: modal.notes || "" }
-          : b
-      )
-    );
-    if (cloudOn){ try{ await cloudUpsertMany([{...modal}]); } catch(e){ console.error(e); } }
-    setModal(null);
-  };
-  const cancelBooking = async () => {
-    if (!modal || !isAdmin) return;
-    setBookings(prev => prev.filter(b => !(b.room === modal.room && b.date === modal.date)));
-    if (cloudOn){ try{ await cloudDelete(modal.room, modal.date); } catch(e){ console.error(e); } }
-    setModal(null);
+    setRangeModal(null);
   };
 
   const exportCSV = () => {
@@ -114,7 +126,7 @@ export default function Availability({ cloudOn }){
 
   return (
     <div className="container" style={{"--scale": compact ? 0.9 : 1}}>
-      <div className="header">
+      <div className="header-bleed">
         <div className="row">
           <button className="btn" onClick={()=> setMonth(addMonths(month,-1))} aria-label="Previous month">‹</button>
           <div style={{fontWeight:800, fontSize:20}}>{format(month, "LLLL yyyy")}</div>
@@ -136,7 +148,7 @@ export default function Availability({ cloudOn }){
             : <button className="btn" onClick={logout}>Clear</button>}
           </div>
         </div>
-        <div className="small" style={{marginTop:4}}>
+        <div className="small" style={{marginTop:4, maxWidth:980, marginLeft:'auto', marginRight:'auto'}}>
           Mode: {cloudOn ? "Cloud Lite (shared)" : "Local only"} • Role: {isAdmin ? "Admin (can edit)" : (email ? "Viewer (read-only)" : "Guest (read-only)")}
         </div>
       </div>
@@ -148,20 +160,20 @@ export default function Availability({ cloudOn }){
               {["M","T","W","T","F","S","S"].map((d,i)=>(<div key={i} className="headcell">{d}</div>))}
               {eachDayOfInterval({start:startOfMonth(month), end:endOfMonth(month)}).map((d, idx) => {
                 const dateStr = keyOf(d);
-                const b = find(room, dateStr);
-                const className = "day" + (b ? " booked" : "") + (inSelectingRange(room, d) ? " range" : "");
+                const booked = !!find(room, dateStr);
+                const className = "day" + (booked ? " booked" : "") + (inPreview(room, d) ? " range-preview" : "");
                 return (
                   <div key={idx}
                     className={className}
-                    onMouseEnter={()=> selecting && setRangeHover(d)}
-                    onMouseLeave={()=> selecting && setRangeHover(null)}
                     onMouseDown={()=> startSelect(room, d)}
-                    onMouseUp={()=> finalizeSelect(room, d)}
+                    onMouseEnter={()=> updateHover(d)}
+                    onMouseUp={()=> endSelect(room, d)}
                     onTouchStart={()=> startSelect(room, d)}
-                    onTouchEnd={()=> finalizeSelect(room, d)}
-                    >
+                    onTouchMove={()=> updateHover(d)}
+                    onTouchEnd={()=> endSelect(room, d)}
+                  >
                     <span className="label">{format(d,"d")}</span>
-                    {b?.guest ? <span className="guest">{b.guest}</span> : null}
+                    {booked && find(room, dateStr)?.guest ? <span className="guest">{find(room, dateStr)?.guest}</span> : null}
                   </div>
                 );
               })}
@@ -171,22 +183,48 @@ export default function Availability({ cloudOn }){
         ))}
       </div>
 
-      {modal && (
-        <div className="modal-bg" onClick={()=> setModal(null)}>
+      {editModal && (
+        <div className="modal-bg" onClick={()=> setEditModal(null)}>
           <div className="modal" onClick={e=> e.stopPropagation()}>
-            <h3>Edit booking — {modal.room}</h3>
-            <div className="small" style={{marginBottom:8}}>{modal.date}</div>
+            <h3>Edit booking — {editModal.room}</h3>
+            <div className="small" style={{marginBottom:8}}>{editModal.date}</div>
             <input className="input" placeholder="Guest name"
-              value={modal.guest} onChange={e=> setModal(m=>({...m, guest:e.target.value}))} />
-            <textarea className="input" placeholder="Notes (phone, details…)" rows={4}
-              value={modal.notes} onChange={e=> setModal(m=>({...m, notes:e.target.value}))}></textarea>
+              value={editModal.guest} onChange={e=> setEditModal(m=>({...m, guest:e.target.value}))} />
+            <AutoGrow value={editModal.notes} onChange={v=> setEditModal(m=>({...m, notes:v}))} placeholder="Notes (phone, details…)" />
             <div className="actions">
-              <button className="btn warn" type="button" onClick={cancelBooking} disabled={!isAdmin}>Cancel booking</button>
-              <button className="btn" type="button" onClick={saveModal} disabled={!isAdmin}>Save</button>
+              <button className="btn warn" type="button" onClick={cancelSingle} disabled={!isAdmin}>Cancel booking</button>
+              <button className="btn" type="button" onClick={saveSingle} disabled={!isAdmin}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {rangeModal && (
+        <div className="modal-bg" onClick={()=> setRangeModal(null)}>
+          <div className="modal" onClick={e=> e.stopPropagation()}>
+            <h3>New booking — {rangeModal.room}</h3>
+            <div className="small" style={{marginBottom:8}}>{rangeModal.startDateStr} → {rangeModal.endDateStr}</div>
+            <input className="input" placeholder="Guest name"
+              value={rangeModal.guest} onChange={e=> setRangeModal(m=>({...m, guest:e.target.value}))} />
+            <AutoGrow value={rangeModal.notes} onChange={v=> setRangeModal(m=>({...m, notes:v}))} placeholder="Notes (phone, details…)" />
+            <div className="actions">
+              <button className="btn" type="button" onClick={()=> setRangeModal(null)}>Close</button>
+              <button className="btn" type="button" onClick={saveRange} disabled={!isAdmin}>Save</button>
             </div>
           </div>
         </div>
       )}
     </div>
+  );
+}
+
+function AutoGrow({ value, onChange, placeholder }){
+  const ref = React.useRef(null);
+  React.useEffect(()=>{
+    if (ref.current){ ref.current.style.height='auto'; ref.current.style.height = (ref.current.scrollHeight+2)+'px'; }
+  }, [value]);
+  return (
+    <textarea ref={ref} className="input" rows={3} placeholder={placeholder}
+      value={value} onChange={e=> onChange(e.target.value)} />
   );
 }
