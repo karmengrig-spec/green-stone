@@ -12,13 +12,8 @@ const ROOMS = [
 ];
 
 const STORAGE_KEY = "guesthouse_bookings_local_v1";
-
-const load = () => {
-  try { const raw = localStorage.getItem(STORAGE_KEY); return raw ? JSON.parse(raw) : []; }
-  catch { return []; }
-};
+const load = () => { try { const raw = localStorage.getItem(STORAGE_KEY); return raw ? JSON.parse(raw) : []; } catch { return []; } };
 const save = (b) => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(b)); } catch {} };
-
 const keyOf = (d) => format(d, "yyyy-MM-dd");
 
 export default function Availability(){
@@ -74,7 +69,7 @@ export default function Availability(){
   const exportCSV = () => {
     const header = "Room,Date,Guest,Notes\n";
     const body = bookings
-      .map(b => `${b.room},${b.date},"${(b.guest||"").replace(/"/g,'""')}","${(b.notes||"").replace(/"/g,'""')}"`)
+      .map(b => `${b.room},${b.date},"${(b.guest||"").replace(/"/g,'"')}","${(b.notes||"").replace(/"/g,'"')}"`)
       .join("\n");
     const blob = new Blob([header + body], { type:"text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
