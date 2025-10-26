@@ -69,7 +69,7 @@ export default function Availability(){
   const exportCSV = () => {
     const header = "Room,Date,Guest,Notes\n";
     const body = bookings
-      .map(b => `${b.room},${b.date},"${(b.guest||"").replace(/"/g,'"')}","${(b.notes||"").replace(/"/g,'"')}"`)
+      .map(b => `${b.room},${b.date},"${(b.guest||"").replace(/"/g,'""')}","${(b.notes||"").replace(/"/g,'""')}"`)
       .join("\n");
     const blob = new Blob([header + body], { type:"text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);

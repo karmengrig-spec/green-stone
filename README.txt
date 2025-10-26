@@ -1,19 +1,21 @@
-Guesthouse Calendar — Local Storage Version (v3.3, no-cloud, no-firebase)
-=======================================================================
+Guesthouse Calendar — FINAL (Local Storage, No Cloud)
+=====================================================
+
+What it is
 - 7 rooms (Sauna included)
 - Tap-to-select ranges per room
-- Tap red day to edit (guest + notes), Save, or Cancel booking
+- Tap a red day to edit (guest + notes), Save, or Cancel booking
 - Persists to localStorage; CSV export included
 
-Deploy (Vercel):
+Deploy on Vercel
 - Build Command: npm run build
 - Output Directory: build
-- No environment variables required
-- Prebuild guard fails the deploy if any 'firebase' import is present in src/
+- Environment Variables: none
+- Project root must include: public/, src/, package.json
 
-Run locally:
+Run locally
 - npm install
 - npm start
 
-Data storage:
+Data storage
 - LocalStorage key: guesthouse_bookings_local_v1

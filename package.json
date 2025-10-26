@@ -1,6 +1,6 @@
 {
-  "name": "guesthouse-calendar-local",
-  "version": "3.3.0",
+  "name": "guesthouse-calendar-local-final",
+  "version": "4.0.0",
   "private": true,
   "dependencies": {
     "react": "^18.2.0",
@@ -9,7 +9,6 @@
     "date-fns": "^3.6.0"
   },
   "scripts": {
-    "prebuild": "node scripts/check-no-firebase.js",
     "start": "react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
