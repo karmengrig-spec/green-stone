@@ -2,6 +2,7 @@ let supa = null;
 let enabled = false;
 
 export function cloudEnabled(){ return enabled; }
+export function client(){ return supa; }
 
 export async function initCloud(){
   const url = process.env.REACT_APP_SUPABASE_URL;
@@ -23,7 +24,7 @@ export async function cloudFetchAll(){
 export function onCloudChanges(cb){
   if (!enabled) return () => {};
   const sub = supa.channel("bookings-all")
-    .on("postgres_changes", {event:"*", schema:"public", table:"bookings"}, payload => cb(payload))
+    .on("postgres_changes", {event:"*", schema:"public", table:"bookings"}, () => cb())
     .subscribe();
   return () => supa.removeChannel(sub);
 }

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { addMonths, format, startOfMonth, endOfMonth, eachDayOfInterval } from "date-fns";
-import { cloudFetchAll, onCloudChanges, cloudUpsertMany, cloudDelete } from "./cloud.js";
+import { cloudFetchAll, onCloudChanges, cloudUpsertMany, cloudDelete, client } from "./cloud.js";
 
 const ROOMS = [
   "Double Room",
@@ -13,7 +13,7 @@ const ROOMS = [
 ];
 
 const STORAGE_KEY = "guesthouse_bookings_local_v1";
-const ADMIN_EMAIL = process.env.REACT_APP_ADMIN_EMAIL || "";
+const ADMIN_EMAIL = (process.env.REACT_APP_ADMIN_EMAIL || "").toLowerCase();
 
 const loadLocal = () => { try { const raw = localStorage.getItem(STORAGE_KEY); return raw ? JSON.parse(raw) : []; } catch { return []; } };
 const saveLocal = (b) => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(b)); } catch {} };
@@ -22,13 +22,15 @@ const keyOf = (d) => format(d, "yyyy-MM-dd");
 export default function Availability({ cloudOn }){
   const [month, setMonth] = useState(startOfMonth(new Date()));
   const [bookings, setBookings] = useState(loadLocal());
-  const [selecting, setSelecting] = useState(null); // {room, start: Date}
-  const [hover, setHover] = useState(null); // Date for preview
-  const [editModal, setEditModal] = useState(null);   // single-day edit
-  const [rangeModal, setRangeModal] = useState(null); // {room, startDateStr, endDateStr, guest, notes}
+  const [rangeSel, setRangeSel] = useState(null); // {room, start?:Date}
+  const [hover, setHover] = useState(null);
+  const [editModal, setEditModal] = useState(null);
+  const [rangeModal, setRangeModal] = useState(null);
   const [compact, setCompact] = useState(true);
+
   const [email, setEmail] = useState(localStorage.getItem("gh_email") || "");
-  const isAdmin = email && ADMIN_EMAIL && email.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+  const [authed, setAuthed] = useState(false);
+  const isAdmin = authed && email.toLowerCase() === ADMIN_EMAIL;
 
   useEffect(()=>{
     let unsubscribe = () => {};
@@ -41,6 +43,8 @@ export default function Availability({ cloudOn }){
             const fresh = await cloudFetchAll();
             if (Array.isArray(fresh)) setBookings(fresh);
           });
+          const { data: { user } } = await client().auth.getUser();
+          if (user?.email?.toLowerCase() === email.toLowerCase()) setAuthed(true);
         }catch(e){ console.error("cloud init failed", e); }
       }
     })();
@@ -49,10 +53,9 @@ export default function Availability({ cloudOn }){
 
   useEffect(() => { saveLocal(bookings); }, [bookings]);
 
-  const days = useMemo(() => eachDayOfInterval({ start:startOfMonth(month), end:endOfMonth(month) }), [month]);
   const find = (room, dateStr) => bookings.find(b => b.room === room && b.date === dateStr);
 
-  const startSelect = (room, date) => {
+  const handleTap = (room, date) => {
     if (!isAdmin) return;
     const dateStr = keyOf(date);
     const existing = find(room, dateStr);
@@ -60,21 +63,18 @@ export default function Availability({ cloudOn }){
       setEditModal({ room, date: existing.date, guest: existing.guest || "", notes: existing.notes || "" });
       return;
     }
-    setSelecting({ room, start: date });
-    setHover(date);
-  };
-  const updateHover = (date) => { if (selecting) setHover(date); };
-  const endSelect = (room, date) => {
-    if (!isAdmin || !selecting) return;
-    if (selecting.room !== room){ setSelecting(null); setHover(null); return; }
-    const [a,b] = [selecting.start, date].sort((x,y)=> x-y);
-    const startStr = keyOf(a), endStr = keyOf(b);
-    setRangeModal({ room, startDateStr:startStr, endDateStr:endStr, guest:"", notes:"" });
-    setSelecting(null); setHover(null);
+    if (!rangeSel || rangeSel.room !== room){
+      setRangeSel({ room, start: date });
+      setHover(date);
+      return;
+    }
+    const [a,b] = [rangeSel.start, date].sort((x,y)=> x-y);
+    setRangeModal({ room, startDateStr: keyOf(a), endDateStr: keyOf(b), guest:"", notes:"" });
+    setRangeSel(null); setHover(null);
   };
   const inPreview = (room, date) => {
-    if (!selecting || selecting.room !== room) return false;
-    const [a,b] = [selecting.start, hover || selecting.start].sort((x,y)=> x-y);
+    if (!rangeSel || rangeSel.room !== room) return false;
+    const [a,b] = [rangeSel.start, hover || rangeSel.start].sort((x,y)=> x-y);
     return date >= a && date <= b;
   };
 
@@ -96,7 +96,6 @@ export default function Availability({ cloudOn }){
     if (cloudOn){ try{ await cloudDelete(editModal.room, editModal.date); } catch(e){ console.error(e); } }
     setEditModal(null);
   };
-
   const saveRange = async () => {
     if (!rangeModal || !isAdmin) return;
     const { room, startDateStr, endDateStr, guest, notes } = rangeModal;
@@ -112,6 +111,17 @@ export default function Availability({ cloudOn }){
     setRangeModal(null);
   };
 
+  const setMail = () => { localStorage.setItem("gh_email", email.trim()); window.location.reload(); };
+  const signIn = async () => {
+    const pwd = prompt("Enter admin password");
+    if (!pwd) return;
+    const { data, error } = await client().auth.signInWithPassword({ email, password: pwd });
+    if (error){ alert("Sign-in failed: " + error.message); return; }
+    setAuthed(true);
+    alert("Signed in as admin.");
+  };
+  const signOut = async () => { await client().auth.signOut(); setAuthed(false); };
+
   const exportCSV = () => {
     const header = "Room,Date,Guest,Notes\n";
     const body = bookings.map(b => `${b.room},${b.date},"${(b.guest||"").replace(/"/g,'"')}","${(b.notes||"").replace(/"/g,'"')}"`).join("\n");
@@ -121,8 +131,7 @@ export default function Availability({ cloudOn }){
     setTimeout(()=>URL.revokeObjectURL(url), 1000);
   };
 
-  const login = () => { localStorage.setItem("gh_email", email.trim()); window.location.reload(); };
-  const logout = () => { localStorage.removeItem("gh_email"); window.location.reload(); };
+  const days = useMemo(() => eachDayOfInterval({ start:startOfMonth(month), end:endOfMonth(month) }), [month]);
 
   return (
     <div className="container" style={{"--scale": compact ? 0.9 : 1}}>
@@ -144,8 +153,11 @@ export default function Availability({ cloudOn }){
           <button className="btn" onClick={exportCSV}>Export CSV</button>
           <div className="switch">
             <input className="input" style={{padding:"6px 8px"}} placeholder="your email" value={email} onChange={e=> setEmail(e.target.value)} />
-            {!email ? <button className="btn" onClick={login}>Set email</button>
-            : <button className="btn" onClick={logout}>Clear</button>}
+            <button className="btn" onClick={setMail}>Set</button>
+            {cloudOn && email.toLowerCase()===ADMIN_EMAIL && !authed ? (
+              <button className="btn" onClick={signIn}>Admin sign in</button>
+            ) : null}
+            {authed ? (<button className="btn" onClick={signOut}>Sign out</button>) : null}
           </div>
         </div>
         <div className="small" style={{marginTop:4, maxWidth:980, marginLeft:'auto', marginRight:'auto'}}>
@@ -158,19 +170,16 @@ export default function Availability({ cloudOn }){
           <div className="room" key={room}>
             <div className="month">
               {["M","T","W","T","F","S","S"].map((d,i)=>(<div key={i} className="headcell">{d}</div>))}
-              {eachDayOfInterval({start:startOfMonth(month), end:endOfMonth(month)}).map((d, idx) => {
+              {days.map((d, idx) => {
                 const dateStr = keyOf(d);
                 const booked = !!find(room, dateStr);
                 const className = "day" + (booked ? " booked" : "") + (inPreview(room, d) ? " range-preview" : "");
                 return (
                   <div key={idx}
                     className={className}
-                    onMouseDown={()=> startSelect(room, d)}
-                    onMouseEnter={()=> updateHover(d)}
-                    onMouseUp={()=> endSelect(room, d)}
-                    onTouchStart={()=> startSelect(room, d)}
-                    onTouchMove={()=> updateHover(d)}
-                    onTouchEnd={()=> endSelect(room, d)}
+                    onClick={()=> handleTap(room, d)}
+                    onMouseEnter={()=> setHover(d)}
+                    onTouchMove={()=> setHover(d)}
                   >
                     <span className="label">{format(d,"d")}</span>
                     {booked && find(room, dateStr)?.guest ? <span className="guest">{find(room, dateStr)?.guest}</span> : null}
@@ -219,8 +228,8 @@ export default function Availability({ cloudOn }){
 }
 
 function AutoGrow({ value, onChange, placeholder }){
-  const ref = React.useRef(null);
-  React.useEffect(()=>{
+  const ref = useRef(null);
+  useEffect(()=>{
     if (ref.current){ ref.current.style.height='auto'; ref.current.style.height = (ref.current.scrollHeight+2)+'px'; }
   }, [value]);
   return (
